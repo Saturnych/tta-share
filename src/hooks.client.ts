@@ -8,7 +8,7 @@ export const handleError: HandleClientError = ({ error, event }): { message: str
 		const errorId: string = createUUID();
     // example integration with https://sentry.io/
     //Sentry.captureException(error, { extra: { event, errorId } });
-    console.log('hooks.client.handleError() PUBLIC_ENV:', PUBLIC_ENV);
+    //console.log('hooks.client.handleError() PUBLIC_ENV:', PUBLIC_ENV);
     return {
       message: 'Whoops!',
       errorId

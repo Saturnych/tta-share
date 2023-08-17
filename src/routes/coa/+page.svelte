@@ -3,7 +3,7 @@
 	import type { PageData } from './$types';
 
 	export let data: PageData = $page.data;
-	if (import.meta.env.DEV) console.log('coa/+page data:', data);
+	//if (import.meta.env.DEV) console.log('coa/+page data:', data);
 </script>
 
 <header class="major">
@@ -11,5 +11,5 @@
 </header>
 
 <div class="text-column">
-<a href="/coa/clk6k021s000tw801sakoa21p.html">clk6k021s000tw801sakoa21p.html</a>
+<a href="/coa/clk6k021s000tw801sakoa21p/">clk6k021s000tw801sakoa21p</a>
 </div>

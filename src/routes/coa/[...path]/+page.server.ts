@@ -9,8 +9,6 @@ export const load: PageServerLoad = async (event: Record<string, any>): Record<s
 	// throw redirect(303, '/auth');
 	//}
   const { params } = event;
-  if (PUBLIC_ENV.DEV) console.log('coa/[...path]/+page.server params:', params);
-
   const coa = await getAction(PRIVATE_ENV.PRIVATE_API_KEY, 'coa/info', params.path);
   //if (PUBLIC_ENV.DEV) console.log('coa/[...path]/+page.server coa:', coa);
 

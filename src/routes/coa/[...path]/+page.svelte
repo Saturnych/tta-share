@@ -3,10 +3,9 @@
 	import type { PageData } from './$types';
 
 	const { url } = $page;
-	if (import.meta.env.DEV) console.log('coa/[...path]/+page url:', url);
+	//if (import.meta.env.DEV) console.log('coa/[...path]/+page url:', url);
 
 	export let data: PageData = $page.data;
-	if (import.meta.env.DEV) console.log('coa/[...path]/+page data.coa:', data.coa);
 </script>
 
 <svelte:head>
