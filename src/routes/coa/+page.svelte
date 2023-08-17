@@ -11,5 +11,5 @@
 </header>
 
 <div class="text-column">
-<a href="/coa/clk6k021s000tw801sakoa21p">clk6k021s000tw801sakoa21p</a>
+<a href="/coa/clk6k021s000tw801sakoa21p.html">clk6k021s000tw801sakoa21p.html</a>
 </div>
