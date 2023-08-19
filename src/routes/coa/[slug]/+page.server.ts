@@ -25,9 +25,12 @@ const getCoas = async (token: string, path: string): Record<string, any>[] => {
 };
 
 export const load: PageServerLoad = async (event: Record<string, any>): Record<string, any> => {
-	//if (!session || !!!session.user || session.expiry_date < Date.now()) {
-	// throw redirect(303, '/auth');
-	//}
+  if (PUBLIC_ENV.DEV) {
+    const coas = await getCoas(PRIVATE_ENV.PRIVATE_API_KEY, 'coa?minted=1&pageSize=1');
+    const slugs: Array<{ slug: string; }> = coas?.results ? coas.results.map(el=>{ return { slug: el.externalId }; }) : [];
+    console.log('coa/slug/+page.server slugs:', slugs);
+  }
+
   const { params } = event;
   if (PUBLIC_ENV.DEV) console.log('coa/slug/+page.server params:', params);
   const coa = await getCoa(PRIVATE_ENV.PRIVATE_API_KEY, 'coa/info', params.slug);
@@ -39,8 +42,8 @@ export const load: PageServerLoad = async (event: Record<string, any>): Record<s
 };
 
 export const entries: EntryGenerator = async (event: Record<string, any>): Array<{ slug: string; }> => {
-  const coas = await getCoas(PRIVATE_ENV.PRIVATE_API_KEY, 'coa');
-  if (PUBLIC_ENV.DEV) console.log('coa/slug/+page.server coas:', coas);
-
-  return [{ slug: 'clk6k021s000tw801sakoa21p' }, { slug: 'clk6k021n000dw801tvybbf79' }];
+  const coas = await getCoas(PRIVATE_ENV.PRIVATE_API_KEY, 'coa?minted=1&pageSize=100');
+  const slugs: Array<{ slug: string; }> = coas?.results ? coas.results.map(el=>{ return { slug: el.externalId }; }) : [];
+  return slugs;
+  //return [{ slug: 'clk6k021s000tw801sakoa21p' }, { slug: 't0011' }, { slug: 'clkwkdhgn00259t0t3841vsl7' }];
 };
