@@ -1,19 +1,14 @@
 <script lang="ts">
-	//import Counter from '$lib/components/Counter.svelte';
+	import PUBLIC_ENV from '$lib/public';
+
+	const title = PUBLIC_ENV.PUBLIC_APP_NAME || 'Title';
 </script>
 
 <svelte:head>
-	<title>Home</title>
-	<meta name="description" content="Svelte demo app" />
+	<title>{title}</title>
+	<meta name="description" content="{title}" />
 </svelte:head>
 
 <section>
-	<h1>
-		to your new<br />SvelteKit app
-	</h1>
-
-	<h2>
-		try editing <strong>src/routes/+page.svelte</strong>
-	</h2>
-
+	<h1>{title}</h1>
 </section>

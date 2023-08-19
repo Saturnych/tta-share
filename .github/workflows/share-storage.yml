@@ -1,0 +1,51 @@
+name: Deploy frontend to GCS
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "development" branch
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up node.js 18.12.1
+        uses: actions/setup-node@v1
+        with:
+          node-version: "18.12.1"
+
+      - name: Build of frontend app
+        env:
+          PUBLIC_APP_NAME: ${{ vars.PUBLIC_APP_NAME }}
+          PUBLIC_APP_URI: ${{ vars.PUBLIC_APP_URI }}
+          PUBLIC_APP_DOMAIN: ${{ vars.SHARE_DOMAIN }}
+          PUBLIC_API_BASEURI: ${{ vars.PUBLIC_API_BASEURI }}
+          PUBLIC_API_VERSION: ${{ vars.PUBLIC_API_VERSION }}
+          PRIVATE_API_KEY: ${{ secrets.PRIVATE_API_KEY }}
+        run: |
+          yarn
+          yarn build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCS_CREDENTIALS }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
+
+      - name: Sync build folder at GCS bucket
+        run: gsutil rsync -d -r ./build gs://${{ vars.SHARE_DOMAIN }}
