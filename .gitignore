@@ -1,7 +1,8 @@
 .DS_Store
 node_modules
-/build
+/.data
 /.svelte-kit
+/build
 /package
 .env
 .env.*
@@ -15,3 +16,4 @@ vite.config.ts.timestamp-*
 pnpm-lock.yaml
 package-lock.json
 yarn.lock
+bun.lockb

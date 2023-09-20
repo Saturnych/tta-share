@@ -1,0 +1,304 @@
+import cookie from 'cookie';
+import jwt from 'jsonwebtoken';
+import { google } from 'googleapis';
+import type { Credentials, OAuth2Client } from 'google-auth-library';
+import { error, type Handle, type ResolveOptions } from '@sveltejs/kit';
+import type { DecodedIdToken, AuthLocals, AuthLocalsSignedIn, AuthClientData, AuthClientDataSignedIn } from './types';
+import { AUTH_CODE_CALLBACK_URL, AUTH_SIGNOUT_URL } from './constants';
+
+/**
+ * Cast the locals to locals including the auth
+ * @param locals
+ */
+export function getAuthLocals(locals: AuthLocalsSignedIn): AuthLocalsSignedIn & App.Locals;
+export function getAuthLocals(locals: App.Locals): AuthLocals & App.Locals;
+export function getAuthLocals(locals: App.Locals | AuthLocalsSignedIn) {
+	return locals as (AuthLocals | AuthLocalsSignedIn) & App.Locals;
+}
+
+/**
+ * Hydrates the client with data from auth
+ *
+ * @param locals the apps locals
+ * @returns data served to the client
+ */
+export function hydrateAuth(locals: AuthLocalsSignedIn): { auth: AuthClientDataSignedIn };
+export function hydrateAuth(locals: App.Locals): { auth: AuthClientData };
+export function hydrateAuth(locals: App.Locals | AuthLocalsSignedIn): {
+	auth: AuthClientData | AuthClientDataSignedIn;
+} {
+	const authLocals = getAuthLocals(locals);
+	return {
+		auth: {
+			user: authLocals.user,
+			client_id: authLocals.client_id,
+			access_token: authLocals?.token?.access_token ?? undefined
+		}
+	};
+}
+
+export function getOAuth2Client(locals: App.Locals) {
+	const authLocals = getAuthLocals(locals);
+	return authLocals.client;
+}
+export function isSignedIn(locals: App.Locals): locals is AuthLocalsSignedIn {
+	return !!getAuthLocals(locals).user;
+}
+
+export function generateAuthUrl(
+	locals: App.Locals,
+	url: URL,
+	scopes: string[],
+	redirectUrl?: string,
+	prompt = 'consent'
+) {
+	const authLocals = getAuthLocals(locals);
+
+	if (!redirectUrl) redirectUrl = url.pathname;
+
+	const redirect_uri = `${url.origin}${AUTH_CODE_CALLBACK_URL}`;
+	const client = new google.auth.OAuth2(
+		authLocals.client_id,
+		authLocals.client_secret,
+		redirect_uri
+	);
+
+	return client.generateAuthUrl({
+		access_type: 'offline',
+		response_type: 'code',
+		prompt,
+		scope: scopes,
+		redirect_uri,
+		state: redirectUrl
+	});
+}
+
+export class SvelteGoogleAuthHook {
+	constructor(
+		private client: {
+			client_id: string;
+			client_secret: string;
+			jwt_secret?: string;
+			[key: string]: unknown;
+		},
+		private cookie_name = 'svgoogleauth',
+		private resolveOptions?: ResolveOptions
+	) {}
+
+	public handleAuth: Handle = async ({ event, resolve }) => {
+		// Read stored data from signed auth cookie
+		const storedTokens = this.parseSignedCookie(event.request);
+		// Create a oauth2 client
+		const oauth2Client = new google.auth.OAuth2(this.client.client_id, this.client.client_secret);
+
+		(event.locals as AuthLocals) = {
+			...event.locals,
+			client_id: this.client.client_id,
+			client_secret: this.client.client_secret,
+			client: oauth2Client
+		};
+
+		// Check if request contains autorization header
+		const autorizationHeader = event.request.headers.get('Authorization');
+		if (autorizationHeader?.toLowerCase().startsWith('bearer')) {
+			const bearerToken = autorizationHeader.match(/^bearer (.+)$/i)?.[1];
+
+			if (bearerToken) {
+				const [tokenInfo, userInfo] = await Promise.all([
+					this.getTokenInfo(bearerToken),
+					this.getUserInfo(bearerToken)
+				]).catch(() => [null, null]);
+
+				if (tokenInfo && userInfo) {
+					const user: DecodedIdToken = { ...tokenInfo, ...userInfo };
+					(event.locals as AuthLocals) = {
+						...event.locals,
+						user,
+						token: { access_token: bearerToken, scope: tokenInfo.scope, token_type: 'Bearer' },
+						client_id: this.client.client_id,
+						client_secret: this.client.client_secret,
+						client: oauth2Client
+					};
+					return await resolve(event, this.resolveOptions);
+				}
+			}
+
+			return new Response(`Invalid bearer token, expected oauth2 access token`, {
+				status: 401
+			});
+		} else {
+			try {
+				if (storedTokens?.refresh_token) {
+					// Obtain a valid access token
+					const accessToken = await this.getAccessToken(storedTokens);
+					// Decode user information from id token
+					const user = this.decodeIdToken(storedTokens);
+
+					// Set credentials on oauth2 client
+					oauth2Client.setCredentials(storedTokens);
+
+					storedTokens.access_token = accessToken;
+
+					// Store tokens and user in locals
+					(event.locals as AuthLocals) = {
+						...event.locals,
+						user,
+						token: storedTokens,
+						client_id: this.client.client_id,
+						client_secret: this.client.client_secret,
+						client: oauth2Client
+					};
+				}
+			} catch (e) {
+				// Something went wrong parsing stored refresh tokens.
+				// Dont update locals with tokens, and let application
+				// decide what to do with lack of tokens.
+			}
+
+			// Inject url's for handling sign in and out
+			if (event.url.pathname === AUTH_CODE_CALLBACK_URL) {
+				if (event.request.method === 'POST') {
+					return this.handlePostCode({ event, resolve });
+				} else if (event.request.method === 'GET') {
+					return this.handleGetCode({ event, resolve });
+				}
+			} else if (event.url.pathname === AUTH_SIGNOUT_URL) {
+				return this.handleSignOut({ event, resolve });
+			}
+
+			return await resolve(event, this.resolveOptions);
+		}
+	};
+
+	private handleSignOut: Handle = async () => {
+		// Overwrite the stored cookie with an empty jwt token
+		const signed = this.signJwtTokens({});
+
+		return new Response('signed out', {
+			headers: this.setCookieHeader(signed)
+		});
+	};
+
+	private handlePostCode: Handle = async ({ event }) => {
+		// https://developers.google.com/identity/oauth2/web/guides/use-code-model#validate_the_request
+		if (event.request.headers.get('X-Requested-With') !== 'XmlHttpRequest') {
+			throw error(403, 'Request is not valid. Does not contain correct X-Requested-With header');
+		}
+
+		const formData = await event.request.formData();
+		const code = formData.get('code');
+
+		if (!code) {
+			throw error(500, 'No code to get token for');
+		}
+		const tokens = await this.getTokenFromCode(code.toString(), 'postmessage');
+		const signedTokens = this.signJwtTokens(tokens);
+
+		return new Response('ok', {
+			headers: this.setCookieHeader(signedTokens)
+		});
+	};
+
+	private handleGetCode: Handle = async ({ event }) => {
+		const code = event.url.searchParams.get('code');
+		const state = event.url.searchParams.get('state') || '/';
+		if (!code) {
+			throw error(500, 'No code to get token for');
+		}
+		const redirect_uri = `${event.url.origin}${event.url.pathname}`;
+		const tokens = await this.getTokenFromCode(code.toString(), redirect_uri);
+		const signedTokens = this.signJwtTokens(tokens);
+
+		return new Response(`Ok`, {
+			status: 302,
+			headers: {
+				...this.setCookieHeader(signedTokens),
+				Location: `${event.url.origin}${state}`
+			}
+		});
+	};
+
+	private async getTokenFromCode(code: string, redirect_uri: string) {
+		const oauth2Client = new google.auth.OAuth2(
+			this.client.client_id,
+			this.client.client_secret,
+			redirect_uri
+		);
+
+		const { tokens } = await oauth2Client.getToken(code.toString()).catch((e) => {
+			if (e.message === 'redirect_uri_mismatch') {
+				console.error(`Redirect uri mismatch. Client configured with uri '${redirect_uri}'`);
+				throw error(500, 'Oauth redirect uri mismatch');
+			}
+			throw error(
+				403,
+				e.response?.data?.error_description ?? 'Could not obtain tokens from oauth2 code'
+			);
+		});
+		return tokens;
+	}
+
+	private async getAccessToken(tokens: Credentials) {
+		const client = new google.auth.OAuth2(this.client.client_id, this.client.client_secret);
+		client.setCredentials(tokens);
+
+		const newAccessTokens = await client.getAccessToken();
+		return newAccessTokens.token;
+	}
+
+	private signJwtTokens(tokens: Credentials) {
+		const key = this.client.jwt_secret ?? this.client.client_secret;
+		return jwt.sign(tokens, key);
+	}
+
+	private parseSignedCookie(request: Request): null | Credentials {
+		const cookies = request.headers.get('cookie');
+		if (!cookies) return null;
+
+		const parsedCookies = cookie.parse(cookies);
+		const authCookie = parsedCookies[this.cookie_name] ?? null;
+		if (!authCookie) return null;
+
+		const key = this.client.jwt_secret ?? this.client.client_secret;
+		try {
+			return jwt.verify(authCookie, key) as Credentials;
+		} catch (e) {
+			console.warn(e);
+			return null;
+		}
+	}
+
+	private decodeIdToken(tokens: Credentials) {
+		if (!tokens.id_token) return undefined;
+		const decoded = jwt.decode(tokens.id_token) as unknown as DecodedIdToken;
+		if (decoded.iss !== 'https://accounts.google.com')
+			throw error(403, 'Invalid id_token issuer ' + decoded.iss);
+		return decoded;
+	}
+
+	private setCookieHeader(signedTokens: string) {
+		const maxAgeDays = 30;
+		return {
+			'set-cookie': `${this.cookie_name}=${signedTokens}; Path=/; HttpOnly; Secure; Max-Age=${
+				maxAgeDays * 86400
+			}`
+		};
+	}
+
+	private getTokenInfo(accessToken: string) {
+		return fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${accessToken}`)
+			.then((res) => res.json())
+			.then((res) => {
+				if (res.error) throw new Error(res.error);
+				return res;
+			});
+	}
+	private getUserInfo(accessToken: string) {
+		return fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`)
+			.then((res) => res.json())
+			.then((res) => {
+				if (res.error) throw new Error(res.error);
+				return res;
+			});
+	}
+}
