@@ -28,3 +28,6 @@
 <p>
 	<a href="/signin">/signin</a> - Example of redirecting user to sign in prompt instead of showing popup
 </p>
+<p>
+	<a href="/auth">/auth</a> - Example of firebase auth via Apple or Google
+</p>

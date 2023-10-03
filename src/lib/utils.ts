@@ -24,4 +24,28 @@ export const getAction = async (token: string = '', service: string = '', action
     console.error('Error:', error.code);
 		return { error };
   }
-}
+};
+
+/**
+ * JSON.parse() catching errors
+ *
+ * @param {String} data
+ * @param {Object} json
+ *
+ */
+export const parseJson = (data: string, json = {}) => {
+	try {
+		json = JSON.parse(data);
+	} catch (err) {
+		//console.error(err);
+	}
+	return json;
+};
+
+export const parseBuffer = (data: Buffer, enc: BufferEncoding = 'utf8') => {
+	const buffer: string = Buffer.from(data).toString(enc).trim();
+	return buffer.indexOf('{') === 0 &&
+		buffer.indexOf('}') === buffer.length - 1
+		? parseJson(buffer)
+		: buffer;
+};
